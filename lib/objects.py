@@ -330,5 +330,3 @@ class Parser:
                 yield message
                 if number + 1 == limit:
                     break
-
-
