@@ -243,7 +243,33 @@ class Parser:
             self.__get_messages(limit=limit)
             return True
 
-    def get_user_messages(self, username: str, chat_username: str = None, limit: int = 1000) -> Generator:
+    def get_user(self, username: str) -> User:
+        """
+        Принимает username, при наличии в db возвращает объект User
+        :param username: username пользователя
+        :return: объект User
+        :raise: UserNotInDbError
+        """
+        with self.session() as session:
+            user: User = session.query(User).filter(User.username == username).first()
+            if user:
+                return user
+            raise UserNotInDbError
+
+    def get_chat(self, chat_username: str) -> Channel:
+        """
+        Принимает username, при наличии в db возвращает объект User
+        :param chat_username: username чата
+        :return: объект User
+        :raise: UserNotInDbError
+        """
+        with self.session() as session:
+            chat: Channel = session.query(Channel).filter(Channel.username == chat_username).first()
+            if chat:
+                return chat
+            raise UserNotInDbError
+
+    def get_user_messages(self, username: str, chat_username: str = None, limit: int = None) -> Generator:
         """
         Принимает username или username и chat_username ищет в базе,
         при наличии возвращает генератор с объектами Message
@@ -274,8 +300,9 @@ class Parser:
 
             else:
                 raise UserNotInDbError
-
             for number, message in enumerate(messages):
                 yield message
-                if number == limit - 1:
+                if number + 1 == limit:
                     break
+
+
