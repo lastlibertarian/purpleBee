@@ -269,6 +269,32 @@ class Parser:
                 return chat
             raise UserNotInDbError
 
+    def get_chat_messages(self, chat_username: str = None, limit: int = None) -> Generator:
+        """
+        Принимает chat_username ищет в базе,
+        при наличии возвращает генератор с объектами Message
+
+        :param chat_username: username чата
+        :param limit: лимит сообщений
+        :return: Generator с объектами Message
+        :raises: ChatNotInDbError если чата нет в db
+        """
+        with self.session() as session:
+            chat_username: str = chat_username.replace('https://t.me/', '') if chat_username.startswith(
+                'https://t.me/') else chat_username
+            chat: Channel = session.query(Channel).filter(Channel.username == chat_username).first()
+
+            if chat:
+
+                messages: list = session.query(Message).filter(Message.chat_id == chat.id).all()
+            else:
+                raise ChatNotInDbError
+
+            for number, message in enumerate(messages):
+                yield message
+                if number + 1 == limit:
+                    break
+
     def get_user_messages(self, username: str, chat_username: str = None, limit: int = None) -> Generator:
         """
         Принимает username или username и chat_username ищет в базе,
