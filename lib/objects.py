@@ -6,6 +6,7 @@ import pyrogram
 import telethon.tl.types
 from pyrogram.errors.exceptions.bad_request_400 import UsernameNotOccupied
 from typing import Union, Generator
+from logger.logger import get_logger
 
 # engine = create_engine('sqlite:///:memory:', echo=True)
 engine = create_engine("mysql+pymysql://ll:passwd@localhost/tg_db", echo=True)
@@ -105,6 +106,9 @@ class Parser:
         self.session: Session = db_session
         self.__chat_username: str = None
         self.__db_channel: Channel = None
+        self.logger = get_logger(f'{__name__}.{__class__.__name__}',
+                                 path='../logger/logs.log',
+                                 debug_mode=True)
 
     @property
     def chat_username(self) -> str:
@@ -112,6 +116,7 @@ class Parser:
         Геттер chat_username
         :return: str
         """
+        self.logger.debug('received chat_username')
         return self.__chat_username
 
     @chat_username.setter
@@ -127,6 +132,8 @@ class Parser:
         if isinstance(chanel_object, Channel):
             self.__chat_username: str = new_chat_username
             self.__db_channel: Channel = chanel_object
+            self.logger.info(
+                f'{self.__db_channel.username} chat_username|__db_channel: Chanel setted and merged into the db ')
         else:
             raise ChatDoesNotExistError
 
@@ -149,7 +156,8 @@ class Parser:
 
                 session.merge(db_channel)
                 return db_channel
-            except UsernameNotOccupied:
+            except UsernameNotOccupied as exception:
+                self.logger.warn(f'UsernameNotOccupied {exception}')
                 return 'ChatDoesNotExist'
 
     def __get_members(self) -> None:
@@ -158,6 +166,7 @@ class Parser:
         """
         with self.telebot, self.session.begin() as session:
             users: telethon.tl.types.User = self.telebot.get_participants(self.__db_channel.username)
+            self.logger.info(f'{self.__db_channel.username} channel members received')
             db_users: list = []
 
             for user in users:
@@ -181,6 +190,7 @@ class Parser:
 
             self.__db_channel.members += db_users
             session.merge(self.__db_channel)
+        self.logger.info(f'merged {len(db_users)} members {self.__db_channel.username} channel into the db')
 
     def __get_messages(self, limit: int = None) -> None:
         """
