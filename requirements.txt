@@ -1,0 +1,8 @@
+Flask~=2.2.2
+Telethon~=1.25.0
+SQLAlchemy~=1.4.41
+Pyrogram~=2.0.51
+PySocks~=1.7.1
+tgcrypto~=1.2.3
+PyMySQL~=1.0.2
+mysql-connector-python~=8.0.30
