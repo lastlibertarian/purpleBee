@@ -4,10 +4,14 @@ from sqlalchemy.orm import relationship, sessionmaker
 from sqlalchemy.ext.declarative import declarative_base
 import pyrogram
 import telethon.tl.types
+import logging
 from pyrogram.errors.exceptions.bad_request_400 import UsernameNotOccupied
 from typing import Union, Generator
-from logger.logger import get_logger
+from logger.logger import get_logger, log_uncaught_exceptions
+import sys
+from exceptions import UserNotInDbError, ChatNotInDbError, ChatDoesNotExistError
 
+sys.excepthook = log_uncaught_exceptions
 # engine = create_engine('sqlite:///:memory:', echo=True)
 engine = create_engine("mysql+pymysql://ll:passwd@localhost/tg_db", echo=True)
 Session = sessionmaker(bind=engine, future=True)
@@ -78,18 +82,6 @@ class Message(Base):
 Base.metadata.create_all()
 
 
-class ChatDoesNotExistError(Exception):
-    pass
-
-
-class UserNotInDbError(Exception):
-    pass
-
-
-class ChatNotInDbError(Exception):
-    pass
-
-
 class Parser:
 
     def __init__(self, pyrogram_client: pyrogram.Client,
@@ -100,15 +92,14 @@ class Parser:
         :param telethon_client: Объект telethon User
         :param db_session: экземпляр db Session
         """
-
+        self.logger: logging.Logger = get_logger(f'{__name__}.{__class__.__name__}',
+                                                 path='../logger/logs.log',
+                                                 debug_mode=True)
         self.pyrobot: pyrogram.Client = pyrogram_client
         self.telebot: telethon.tl.types.User = telethon_client
         self.session: Session = db_session
         self.__chat_username: str = None
         self.__db_channel: Channel = None
-        self.logger = get_logger(f'{__name__}.{__class__.__name__}',
-                                 path='../logger/logs.log',
-                                 debug_mode=True)
 
     @property
     def chat_username(self) -> str:
@@ -126,6 +117,7 @@ class Parser:
         :param new_chat_username: username чата
         :raise ChatDoesNotExistError
         """
+        self.logger.debug('called chat_username')
         new_chat_username: str = new_chat_username.replace('https://t.me/', '') if new_chat_username.startswith(
             'https://t.me/') else new_chat_username
         chanel_object: Union[Channel, str] = self.__get_chat(chat_username=new_chat_username)
@@ -142,6 +134,7 @@ class Parser:
         Получает инфо чата и добавляет в db
         :return: object: Channel or str
         """
+        self.logger.debug('called __get_chat')
         with self.pyrobot, self.session.begin() as session:
             try:
                 chat: pyrogram.types.Chat = self.pyrobot.get_chat(chat_username)
@@ -157,80 +150,94 @@ class Parser:
                 session.merge(db_channel)
                 return db_channel
             except UsernameNotOccupied as exception:
-                self.logger.warn(f'UsernameNotOccupied {exception}')
+                self.logger.error(f'{exception.__class__.__name__} {exception}')
                 return 'ChatDoesNotExist'
+            except Exception as exception:
+                self.logger.error(f'{exception.__class__.__name__} {exception}')
 
     def __get_members(self) -> None:
         """
         Получает всех участников чата и добавляет в db
         """
+        self.logger.debug('called __get_members')
         with self.telebot, self.session.begin() as session:
-            users: telethon.tl.types.User = self.telebot.get_participants(self.__db_channel.username)
-            self.logger.info(f'{self.__db_channel.username} channel members received')
-            db_users: list = []
+            try:
+                users: telethon.tl.types.User = self.telebot.get_participants(self.__db_channel.username)
+                self.logger.info(f'{self.__db_channel.username} channel members received')
+                db_users: list = []
 
-            for user in users:
-                db_user: User = User(id=str(user.id),
-                                     username=user.username,
-                                     firstname=user.first_name,
-                                     lastname=user.last_name,
-                                     photo=str(user.photo.photo_id) if user.photo else None,
-                                     status=str(user.status).replace('UserStatus', '').lower()[
-                                            :-2] if user.status else None,
-                                     phone=user.phone,
-                                     bot=user.bot,
-                                     verified=user.verified,
-                                     deleted=user.deleted,
-                                     scam=user.scam,
-                                     fake=user.fake,
-                                     premium=user.premium)
+                for user in users:
+                    db_user: User = User(id=str(user.id),
+                                         username=user.username,
+                                         firstname=user.first_name,
+                                         lastname=user.last_name,
+                                         photo=str(user.photo.photo_id) if user.photo else None,
+                                         status=str(user.status).replace('UserStatus', '').lower()[
+                                                :-2] if user.status else None,
+                                         phone=user.phone,
+                                         bot=user.bot,
+                                         verified=user.verified,
+                                         deleted=user.deleted,
+                                         scam=user.scam,
+                                         fake=user.fake,
+                                         premium=user.premium)
 
-                db_users.append(db_user)
-                session.merge(db_user)
+                    db_users.append(db_user)
+                    session.merge(db_user)
 
-            self.__db_channel.members += db_users
-            session.merge(self.__db_channel)
-        self.logger.info(f'merged {len(db_users)} members {self.__db_channel.username} channel into the db')
+                self.__db_channel.members += db_users
+                session.merge(self.__db_channel)
+                self.logger.info(f'merged {len(db_users)} members {self.__db_channel.username} channel into the db')
+
+            except Exception as exception:
+                self.logger.error(f'{exception.__class__.__name__} {exception}')
 
     def __get_messages(self, limit: int = None) -> None:
         """
         Получает сообщения чата и добавляет в db
         """
+        self.logger.debug('called __get_messages')
         with self.pyrobot, self.session.begin() as session:
+            try:
+                messages: pyrogram.types.Message = self.pyrobot.get_chat_history(self.__db_channel.username,
+                                                                                 limit=limit)
+                self.logger.info(f'{self.__db_channel.username} channel messages generator received')
+                db_channel_id: int = self.__db_channel.id
 
-            messages: pyrogram.types.Message = self.pyrobot.get_chat_history(self.__db_channel.username, limit=limit)
-            db_channel_id: int = self.__db_channel.id
+                for message in messages:
+                    if message.from_user:
+                        db_user: User = User(id=str(message.from_user.id),
+                                             username=message.from_user.username,
+                                             firstname=message.from_user.first_name,
+                                             lastname=message.from_user.last_name,
+                                             photo=str(message.from_user.photo.small_photo_unique_id
+                                                       ) if message.from_user.photo else None,
+                                             status=str(message.from_user.status).replace(
+                                                 'UserStatus.', '').lower() if message.from_user.status else None,
+                                             bot=message.from_user.is_bot,
+                                             verified=message.from_user.is_verified,
+                                             deleted=message.from_user.is_deleted,
+                                             scam=message.from_user.is_scam,
+                                             fake=message.from_user.is_fake,
+                                             premium=message.from_user.is_premium)
+                        session.merge(db_user)
 
-            for message in messages:
-                if message.from_user:
-                    db_user: User = User(id=str(message.from_user.id),
-                                         username=message.from_user.username,
-                                         firstname=message.from_user.first_name,
-                                         lastname=message.from_user.last_name,
-                                         photo=str(message.from_user.photo.small_photo_unique_id
-                                                   ) if message.from_user.photo else None,
-                                         status=str(message.from_user.status).replace(
-                                             'UserStatus.', '').lower() if message.from_user.status else None,
-                                         bot=message.from_user.is_bot,
-                                         verified=message.from_user.is_verified,
-                                         deleted=message.from_user.is_deleted,
-                                         scam=message.from_user.is_scam,
-                                         fake=message.from_user.is_fake,
-                                         premium=message.from_user.is_premium)
-                    session.merge(db_user)
+                        db_message: Message = Message(id=f"{db_channel_id}:{message.id}",
+                                                      user_id=message.from_user.id,
+                                                      chat_id=message.chat.id,
+                                                      date=message.date,
+                                                      reply_to_message_id=message.reply_to_message_id,
+                                                      reply_to_top_message_id=message.reply_to_top_message_id,
+                                                      text=message.text)
 
-                    db_message: Message = Message(id=f"{db_channel_id}:{message.id}",
-                                                  user_id=message.from_user.id,
-                                                  chat_id=message.chat.id,
-                                                  date=message.date,
-                                                  reply_to_message_id=message.reply_to_message_id,
-                                                  reply_to_top_message_id=message.reply_to_top_message_id,
-                                                  text=message.text)
+                    session.merge(db_message)
+                    db_user.messages.append(db_message)
 
-                session.merge(db_message)
-                db_user.messages.append(db_message)
+                    self.__db_channel.messages.append(db_message)
+                self.logger.info(f'merged {self.__db_channel.username} channel messages into the db')
 
-                self.__db_channel.messages.append(db_message)
+            except Exception as exception:
+                self.logger.error(f'{exception.__class__.__name__} {exception}')
 
     def parse_users(self, chat_username: str) -> bool:
         """
@@ -238,6 +245,7 @@ class Parser:
         :param chat_username: username чата
         :return: bool
         """
+        self.logger.debug('called parse_users')
         self.chat_username = chat_username
         self.__get_members()
         return True
@@ -249,6 +257,7 @@ class Parser:
         :param limit: максимальное количество сообщений
         :return: bool
         """
+        self.logger.debug('called full_chat_parsing')
         if self.parse_users(chat_username=chat_username):
             self.__get_messages(limit=limit)
             return True
@@ -260,11 +269,12 @@ class Parser:
         :return: объект User
         :raise: UserNotInDbError
         """
+        self.logger.debug('called get_user')
         with self.session() as session:
             user: User = session.query(User).filter(User.username == username).first()
             if user:
                 return user
-            raise UserNotInDbError
+            raise UserNotInDbError(f"User <{username}> not found in database")
 
     def get_chat(self, chat_username: str) -> Channel:
         """
@@ -273,11 +283,12 @@ class Parser:
         :return: объект User
         :raise: UserNotInDbError
         """
+        self.logger.debug('called get_chat')
         with self.session() as session:
             chat: Channel = session.query(Channel).filter(Channel.username == chat_username).first()
             if chat:
                 return chat
-            raise UserNotInDbError
+            raise ChatNotInDbError
 
     def get_chat_messages(self, chat_username: str = None, limit: int = None) -> Generator:
         """
@@ -289,6 +300,7 @@ class Parser:
         :return: Generator с объектами Message
         :raises: ChatNotInDbError если чата нет в db
         """
+        self.logger.debug('called get_chat_messages')
         with self.session() as session:
             chat_username: str = chat_username.replace('https://t.me/', '') if chat_username.startswith(
                 'https://t.me/') else chat_username
@@ -317,6 +329,7 @@ class Parser:
         :raises: UserNotInDbError если юзера нет в db
         :raises: ChatNotInDbError если чата нет в db
         """
+        self.logger.debug('called get_user_messages')
         with self.session() as session:
 
             user: User = session.query(User).filter(User.username == username).first()

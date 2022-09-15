@@ -1,4 +1,6 @@
 import logging
+import traceback
+
 
 _log_format = '[%(asctime)s] [%(name)s.%(funcName)-8s] [%(levelname)s] : %(message)s'
 
@@ -44,7 +46,15 @@ def get_stream_handler():
 def get_logger(name, path, debug_mode=False):
     logger = logging.getLogger(name)
     logger.setLevel(logging.DEBUG)
-    logger.addHandler(get_file_handler(path))
     if debug_mode:
         logger.addHandler(get_stream_handler())
+        return logger
+    logger.addHandler(get_file_handler(path))
     return logger
+
+
+def log_uncaught_exceptions(ex_cls, ex, tb):
+    text = '{}: {}:\n'.format(ex_cls.__name__, ex)
+    text += ''.join(traceback.format_tb(tb))
+    logger = get_logger(__name__, '../logger/logs.log', debug_mode=True)
+    logger.critical(text)
