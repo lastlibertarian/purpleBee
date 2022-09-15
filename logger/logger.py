@@ -58,3 +58,4 @@ def log_uncaught_exceptions(ex_cls, ex, tb):
     text += ''.join(traceback.format_tb(tb))
     logger = get_logger(__name__, '../logger/logs.log', debug_mode=True)
     logger.critical(text)
+
