@@ -10,6 +10,7 @@ from typing import Union, Generator
 from logger.logger import get_logger, log_uncaught_exceptions
 import sys
 from exceptions import UserNotInDbError, ChatNotInDbError, ChatDoesNotExistError
+from sqlalchemy.orm import joinedload
 
 sys.excepthook = log_uncaught_exceptions
 # engine = create_engine('sqlite:///:memory:', echo=True)
@@ -34,8 +35,8 @@ class Channel(Base):
     scam = Column('scam', Boolean, default=False)
     dc_id = Column('dc_id', Integer)
     members_count = Column('members_count', Integer)
-    members = relationship("User", secondary='chanel_users', back_populates="channels")
-    messages = relationship("Message", back_populates="from_chat")
+    members = relationship("User", secondary='chanel_users', back_populates="channels", lazy="joined")
+    messages = relationship("Message", back_populates="from_chat", lazy="joined")
 
     def __repr__(self) -> str:
         return f'Channel <id={self.id} username={self.username}>'
@@ -56,8 +57,8 @@ class User(Base):
     deleted = Column('deleted', Boolean, default=False)
     fake = Column('fake', Boolean, default=False)
     premium = Column('premium', Boolean, default=False)
-    channels = relationship("Channel", secondary='chanel_users', back_populates="members")
-    messages = relationship("Message", back_populates="from_user")
+    channels = relationship("Channel", secondary='chanel_users', back_populates="members", lazy="joined")
+    messages = relationship("Message", back_populates="from_user", lazy="joined")
 
     def __repr__(self) -> str:
         return f'User <id={self.id} username={self.username}>'
@@ -67,9 +68,9 @@ class Message(Base):
     __tablename__ = 'messages'
     id = Column('id', String(200), primary_key=True)
     user_id = Column('user_id', String(200), ForeignKey('users.id'))
-    from_user = relationship("User", back_populates="messages")
+    from_user = relationship("User", back_populates="messages", lazy="joined")
     chat_id = Column('chat_id', String(200), ForeignKey('channels.id'))
-    from_chat = relationship("Channel", back_populates="messages")
+    from_chat = relationship("Channel", back_populates="messages", lazy="joined")
     date = Column('date', DateTime())
     reply_to_message_id = Column('reply_to_message_id', String(200))
     reply_to_top_message_id = Column('reply_to_top_message_id', String(200))
@@ -230,8 +231,8 @@ class Parser:
                                                       reply_to_top_message_id=message.reply_to_top_message_id,
                                                       text=message.text)
 
-                    session.merge(db_message)
-                    db_user.messages.append(db_message)
+                        session.merge(db_message)
+                        db_user.messages.append(db_message)
 
                     self.__db_channel.messages.append(db_message)
                 self.logger.info(f'merged {self.__db_channel.username} channel messages into the db')
@@ -270,8 +271,11 @@ class Parser:
         :raise: UserNotInDbError
         """
         self.logger.debug('called get_user')
-        with self.session() as session:
-            user: User = session.query(User).filter(User.username == username).first()
+        with Session() as session:
+            user: User = session.query(User).options(joinedload(User.messages)).filter(User.username == username).first()
+            # user: User = session.query(User).filter(User.username == username).first()
+
+            session.refresh(user)
             if user:
                 return user
             raise UserNotInDbError(f"User <{username}> not found in database")
@@ -353,4 +357,3 @@ class Parser:
                 yield message
                 if number + 1 == limit:
                     break
-
