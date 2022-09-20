@@ -2,7 +2,7 @@ import logging
 import traceback
 
 
-_log_format = '[%(asctime)s] [%(name)s.%(funcName)-8s] [%(levelname)s] : %(message)s'
+_log_format = '[%(asctime)s] [%(name)s %(funcName)s] [%(levelname)s] : %(message)s'
 
 
 class CustomFormatter(logging.Formatter):
@@ -53,9 +53,8 @@ def get_logger(name, path, debug_mode=False):
     return logger
 
 
-def log_uncaught_exceptions(ex_cls, ex, tb):
-    text = '{}: {}:\n'.format(ex_cls.__name__, ex)
-    text += ''.join(traceback.format_tb(tb))
-    logger = get_logger(__name__, '../logger/logs.log', debug_mode=True)
+def log_uncaught_exceptions(exc_type, exc_value, exc_traceback):
+    text = f'[line {exc_traceback.tb_frame.f_lineno}] : {exc_type.__name__}: {exc_value}\n ' \
+           f'{traceback.format_tb(exc_traceback)}'
+    logger = get_logger(exc_traceback.tb_frame.f_code.co_filename, 'logs.log', debug_mode=True)
     logger.critical(text)
-

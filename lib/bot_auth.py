@@ -1,22 +1,26 @@
-import telethon
-import pyrogram
-import asyncio
+from telethon.sync import TelegramClient
+from pyrogram import Client
+import os
+import configparser
+from logger.logger import log_uncaught_exceptions
+import sys
 
-api_id = 12359630
-api_hash = 'f85fd0ec567c2f9ed2378fc4bc59a137'
-username = 'lastbart'
+sys.excepthook = log_uncaught_exceptions
+
+INDEX_DIRECTORY = '%s' % os.path.dirname(os.path.realpath(__file__))
+config = configparser.ConfigParser()
+config_file_path = '%s/../configs/config.ini' % INDEX_DIRECTORY
+config.read(config_file_path)
+
+api_id = config.get('tgClient', 'api_id')
+api_hash = config.get('tgClient', 'api_hash')
+username = config.get('tgClient', 'username')
+
+pyrobot = Client(name=f'pyrogram_{username}', api_id=api_id, api_hash=api_hash)
+telebot = TelegramClient(session=f'telethon_{username}', api_id=api_id, api_hash=api_hash)
 
 
-async def login():
-    async with pyrogram.Client(name=f'pyrogram_{username}',
-                               api_id=api_id,
-                               api_hash=api_hash) as pyrobot, \
-            telethon.TelegramClient(session=f'telethon_{username}',
-                                    api_id=api_id,
-                                    api_hash=api_hash) as telebot:
-        await pyrobot.send_message("me", "**Pyrogram**")
-        await telebot.send_message('me', '**Telethon**')
-
-
-asyncio.run(login())
-
+def login():
+    with pyrobot, telebot:
+        pyrobot.send_message("me", "**Pyrogram**")
+        telebot.send_message('me', '**Telethon**')

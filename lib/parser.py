@@ -1,7 +1,4 @@
-from sqlalchemy import create_engine
-from sqlalchemy import Table, Column, Integer, ForeignKey, String, Boolean, DateTime
-from sqlalchemy.orm import relationship, sessionmaker
-from sqlalchemy.ext.declarative import declarative_base
+from .tables import User, Channel, Message
 import pyrogram
 import telethon.tl.types
 import logging
@@ -11,76 +8,9 @@ from logger.logger import get_logger, log_uncaught_exceptions
 import sys
 from exceptions import UserNotInDbError, ChatNotInDbError, ChatDoesNotExistError
 from sqlalchemy.orm import joinedload
+from sqlalchemy.orm.session import Session
 
 sys.excepthook = log_uncaught_exceptions
-# engine = create_engine('sqlite:///:memory:', echo=True)
-engine = create_engine("mysql+pymysql://ll:passwd@localhost/tg_db", echo=True)
-Session = sessionmaker(bind=engine, future=True)
-# session = Session()
-Base = declarative_base(bind=engine)
-
-Table('chanel_users', Base.metadata,
-      Column('associative_chanel', String(200), ForeignKey('channels.id')),
-      Column('associative_user', String(200), ForeignKey('users.id'))
-      )
-
-
-class Channel(Base):
-    __tablename__ = 'channels'
-    id = Column('id', String(200), primary_key=True)
-    title = Column('title', String(128))
-    description = Column('description', String(255))
-    username = Column('username', String(32), nullable=False)
-    chat_photo = Column('chat_photo', String(200))
-    scam = Column('scam', Boolean, default=False)
-    dc_id = Column('dc_id', Integer)
-    members_count = Column('members_count', Integer)
-    members = relationship("User", secondary='chanel_users', back_populates="channels", lazy="joined")
-    messages = relationship("Message", back_populates="from_chat", lazy="joined")
-
-    def __repr__(self) -> str:
-        return f'Channel <id={self.id} username={self.username}>'
-
-
-class User(Base):
-    __tablename__ = 'users'
-    id = Column('id', String(200), primary_key=True)
-    username = Column('username', String(32))
-    firstname = Column('firstname', String(64))
-    lastname = Column('lastname', String(64))
-    photo = Column('photo', String(200))
-    status = Column('status', String(200))
-    phone = Column('phone', String(30))
-    bot = Column('bot', Boolean, default=False)
-    verified = Column('verified', Boolean, default=False)
-    scam = Column('scam', Boolean, default=False)
-    deleted = Column('deleted', Boolean, default=False)
-    fake = Column('fake', Boolean, default=False)
-    premium = Column('premium', Boolean, default=False)
-    channels = relationship("Channel", secondary='chanel_users', back_populates="members", lazy="joined")
-    messages = relationship("Message", back_populates="from_user", lazy="joined")
-
-    def __repr__(self) -> str:
-        return f'User <id={self.id} username={self.username}>'
-
-
-class Message(Base):
-    __tablename__ = 'messages'
-    id = Column('id', String(200), primary_key=True)
-    user_id = Column('user_id', String(200), ForeignKey('users.id'))
-    from_user = relationship("User", back_populates="messages", lazy="joined")
-    chat_id = Column('chat_id', String(200), ForeignKey('channels.id'))
-    from_chat = relationship("Channel", back_populates="messages", lazy="joined")
-    date = Column('date', DateTime())
-    reply_to_message_id = Column('reply_to_message_id', String(200))
-    reply_to_top_message_id = Column('reply_to_top_message_id', String(200))
-    text = Column('text', String(4200))
-
-    def __repr__(self) -> str:
-        return f'Message <date={self.date} text={self.text}>'
-
-
-Base.metadata.create_all()
 
 
 class Parser:
@@ -231,8 +161,8 @@ class Parser:
                                                       reply_to_top_message_id=message.reply_to_top_message_id,
                                                       text=message.text)
 
-                        session.merge(db_message)
-                        db_user.messages.append(db_message)
+                    session.merge(db_message)
+                    db_user.messages.append(db_message)
 
                     self.__db_channel.messages.append(db_message)
                 self.logger.info(f'merged {self.__db_channel.username} channel messages into the db')
@@ -251,16 +181,16 @@ class Parser:
         self.__get_members()
         return True
 
-    def full_chat_parsing(self, chat_username: str, limit: int = 50000) -> bool:
+    def full_chat_parsing(self, chat_username: str, message_limit: int = 50000) -> bool:
         """
         Метод парсинг юзеров и сообщений и добавление в db
         :param chat_username: username чата
-        :param limit: максимальное количество сообщений
+        :param message_limit: максимальное количество сообщений
         :return: bool
         """
         self.logger.debug('called full_chat_parsing')
         if self.parse_users(chat_username=chat_username):
-            self.__get_messages(limit=limit)
+            self.__get_messages(limit=message_limit)
             return True
 
     def get_user(self, username: str) -> User:
@@ -271,11 +201,8 @@ class Parser:
         :raise: UserNotInDbError
         """
         self.logger.debug('called get_user')
-        with Session() as session:
-            user: User = session.query(User).options(joinedload(User.messages)).filter(User.username == username).first()
-            # user: User = session.query(User).filter(User.username == username).first()
-
-            session.refresh(user)
+        with self.session() as session:
+            user: User = session.query(User).filter(User.username == username).first()
             if user:
                 return user
             raise UserNotInDbError(f"User <{username}> not found in database")
@@ -298,7 +225,6 @@ class Parser:
         """
         Принимает chat_username ищет в базе,
         при наличии возвращает генератор с объектами Message
-
         :param chat_username: username чата
         :param limit: лимит сообщений
         :return: Generator с объектами Message
@@ -325,7 +251,6 @@ class Parser:
         """
         Принимает username или username и chat_username ищет в базе,
         при наличии возвращает генератор с объектами Message
-
         :param username: username пользователя
         :param chat_username: username чата
         :param limit: лимит сообщений
