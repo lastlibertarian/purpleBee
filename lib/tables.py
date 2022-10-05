@@ -6,7 +6,7 @@ import sys
 
 sys.excepthook = log_uncaught_exceptions
 
-Base = session(base_required=True, echo=True)
+Base = session(base_required=True, echo=False)
 
 Table('chanel_users', Base.metadata,
       Column('associative_chanel', String(200), ForeignKey('channels.id')),

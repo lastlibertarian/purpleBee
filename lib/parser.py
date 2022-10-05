@@ -1,4 +1,4 @@
-from .tables import User, Channel, Message
+from tables import User, Channel, Message
 import pyrogram
 import telethon.tl.types
 import logging
@@ -7,8 +7,9 @@ from typing import Union, Generator
 from logger.logger import get_logger, log_uncaught_exceptions
 import sys
 from exceptions import UserNotInDbError, ChatNotInDbError, ChatDoesNotExistError
-from sqlalchemy.orm import joinedload
+from db_session.db_index import writer
 from sqlalchemy.orm.session import Session
+from db_session.db_session import session as db_session
 
 sys.excepthook = log_uncaught_exceptions
 
@@ -16,8 +17,7 @@ sys.excepthook = log_uncaught_exceptions
 class Parser:
 
     def __init__(self, pyrogram_client: pyrogram.Client,
-                 telethon_client: telethon.tl.types.User,
-                 db_session: Session):
+                 telethon_client: telethon.tl.types.User):
         """
         :param pyrogram_client: Объект pyrogram Client
         :param telethon_client: Объект telethon User
@@ -28,7 +28,7 @@ class Parser:
                                                  debug_mode=True)
         self.pyrobot: pyrogram.Client = pyrogram_client
         self.telebot: telethon.tl.types.User = telethon_client
-        self.session: Session = db_session
+        self.session: Session = db_session()
         self.__chat_username: str = None
         self.__db_channel: Channel = None
 
@@ -128,7 +128,7 @@ class Parser:
         Получает сообщения чата и добавляет в db
         """
         self.logger.debug('called __get_messages')
-        with self.pyrobot, self.session.begin() as session:
+        with self.pyrobot, self.session.begin() as session, db_writer:
             try:
                 messages: pyrogram.types.Message = self.pyrobot.get_chat_history(self.__db_channel.username,
                                                                                  limit=limit)
@@ -161,6 +161,9 @@ class Parser:
                                                       reply_to_top_message_id=message.reply_to_top_message_id,
                                                       text=message.text)
 
+                        writer.add_document(message_id=u'{}:{}'.format(db_channel_id, message.id),
+                                               user_id=u'{}'.format(message.from_user.id),
+                                               content=u'{}'.format(message.text))
                     session.merge(db_message)
                     db_user.messages.append(db_message)
 
@@ -193,19 +196,7 @@ class Parser:
             self.__get_messages(limit=message_limit)
             return True
 
-    def get_user(self, username: str) -> User:
-        """
-        Принимает username, при наличии в db возвращает объект User
-        :param username: username пользователя
-        :return: объект User
-        :raise: UserNotInDbError
-        """
-        self.logger.debug('called get_user')
-        with self.session() as session:
-            user: User = session.query(User).filter(User.username == username).first()
-            if user:
-                return user
-            raise UserNotInDbError(f"User <{username}> not found in database")
+
 
     def get_chat(self, chat_username: str) -> Channel:
         """

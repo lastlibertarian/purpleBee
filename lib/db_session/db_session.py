@@ -11,7 +11,7 @@ sys.excepthook = log_uncaught_exceptions
 INDEX_DIRECTORY = '%s' % os.path.dirname(os.path.realpath(__file__))
 
 
-def session(base_required=False, echo=False):
+def engine(echo=False):
     config = configparser.ConfigParser()
     config_file_path = '%s/../../configs/config.ini' % INDEX_DIRECTORY
     config.read(config_file_path)
@@ -23,7 +23,12 @@ def session(base_required=False, echo=False):
                                                                    db_pass.replace('"', ''),
                                                                    db_host.replace('"', ''),
                                                                    db_name.replace('"', ''))
-    engine = create_engine(conn_string, echo=echo)
+    result = create_engine(conn_string, echo=echo)
+    return result
+
+
+def session(base_required=False, echo=False):
+    eng = engine(echo=echo)
     if base_required:
-        return declarative_base(bind=engine)
-    return orm.sessionmaker(bind=engine, future=True)
+        return declarative_base(bind=eng)
+    return orm.sessionmaker(bind=eng, future=True)
